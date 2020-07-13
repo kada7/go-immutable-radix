@@ -2,6 +2,7 @@ package iradix
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 
 	"github.com/hashicorp/golang-lru/simplelru"
@@ -246,7 +247,15 @@ func (t *Txn) mergeChild(n *Node) {
 }
 
 // insert does a recursive insertion
-func (t *Txn) insert(n *Node, k, search []byte, v interface{}) (*Node, interface{}, bool) {
+func (t *Txn) insert(n *Node, k, search []byte, v interface{}, deep ...int) (*Node, interface{}, bool) {
+	var d = 0
+	if len(deep) != 0 {
+		d = deep[0]
+	}
+	fmt.Println(d, "===== txn.insert Start ======")
+	fmt.Printf("search: %s, k: %s, v: %+v\n", search, k, v)
+	fmt.Println("n: ", formatNode(0, n))
+
 	// Handle key exhaustion
 	if len(search) == 0 {
 		var oldVal interface{}
@@ -262,6 +271,9 @@ func (t *Txn) insert(n *Node, k, search []byte, v interface{}) (*Node, interface
 			key:      k,
 			val:      v,
 		}
+		fmt.Println(d, "==== txn.insert (search == 0) =====")
+		fmt.Printf("return oldVal: %+v, didUpdate: %v\n", oldVal, didUpdate)
+		fmt.Println("return node: ", formatNode(0, nc))
 		return nc, oldVal, didUpdate
 	}
 
@@ -284,19 +296,35 @@ func (t *Txn) insert(n *Node, k, search []byte, v interface{}) (*Node, interface
 		}
 		nc := t.writeNode(n, false)
 		nc.addEdge(e)
+
+		fmt.Println(d, "==== txn.insert (search[0] child == nil) =====")
+		fmt.Printf("return oldVal: %+v, didUpdate: %v\n", nil, false)
+		fmt.Println("return node: ", formatNode(0, nc))
 		return nc, nil, false
 	}
 
+	fmt.Printf("%d== child index: %d, node: %s\n", d, idx, formatNode(0, child))
+
 	// Determine longest prefix of the search key on match
 	commonPrefix := longestPrefix(search, child.prefix)
+
+	fmt.Printf("%d== commonPrefix: %d, search[commonPrefix:]: %s, search[:commonPrefix]: %s\n", d, commonPrefix, search[commonPrefix:], search[:commonPrefix])
+
 	if commonPrefix == len(child.prefix) {
 		search = search[commonPrefix:]
-		newChild, oldVal, didUpdate := t.insert(child, k, search, v)
+		newChild, oldVal, didUpdate := t.insert(child, k, search, v, d+1)
 		if newChild != nil {
 			nc := t.writeNode(n, false)
 			nc.edges[idx].node = newChild
+
+			fmt.Println(d, "==== txn.insert (commonPrefix == len(child.prefix) && newChild != nil) =====")
+			fmt.Printf("return oldVal: %+v, didUpdate: %v\n", oldVal, didUpdate)
+			fmt.Println("return node: ", formatNode(0, nc))
 			return nc, oldVal, didUpdate
 		}
+		fmt.Println(d, "==== txn.insert (commonPrefix == len(child.prefix) && newChild == nil) =====")
+		fmt.Printf("return oldVal: %+v, didUpdate: %v\n", oldVal, didUpdate)
+		fmt.Println("return node: ", formatNode(0, nil))
 		return nil, oldVal, didUpdate
 	}
 
@@ -311,6 +339,8 @@ func (t *Txn) insert(n *Node, k, search []byte, v interface{}) (*Node, interface
 		node:  splitNode,
 	})
 
+	fmt.Printf("%d== splitNode[1]: %s\n", d, formatNode(0, splitNode))
+
 	// Restore the existing child node
 	modChild := t.writeNode(child, false)
 	splitNode.addEdge(edge{
@@ -318,6 +348,10 @@ func (t *Txn) insert(n *Node, k, search []byte, v interface{}) (*Node, interface
 		node:  modChild,
 	})
 	modChild.prefix = modChild.prefix[commonPrefix:]
+
+	fmt.Printf("%d == modChild: %s\n", d, formatNode(0, modChild))
+
+	fmt.Printf("%d== splitNode[2]: %s\n", d, formatNode(0, splitNode))
 
 	// Create a new leaf node
 	leaf := &leafNode{
@@ -330,6 +364,12 @@ func (t *Txn) insert(n *Node, k, search []byte, v interface{}) (*Node, interface
 	search = search[commonPrefix:]
 	if len(search) == 0 {
 		splitNode.leaf = leaf
+
+		fmt.Printf("%d== splitNode[3]: %s\n", d,formatNode(0, splitNode))
+
+		fmt.Println(d, "==== txn.insert (search = search[commonPrefix:] && len(search) == 0) =====")
+		fmt.Printf("return oldVal: %+v, didUpdate: %v\n", nil, false)
+		fmt.Println("return node: ", formatNode(0, nil))
 		return nc, nil, false
 	}
 
@@ -342,6 +382,12 @@ func (t *Txn) insert(n *Node, k, search []byte, v interface{}) (*Node, interface
 			prefix:   search,
 		},
 	})
+
+	fmt.Printf("%d== splitNode[3]: %s\n", d, formatNode(0, splitNode))
+
+	fmt.Println(d, "==== txn.insert Last =====")
+	fmt.Printf("return oldVal: %+v, didUpdate: %v\n", nil, false)
+	fmt.Println("return node: ", formatNode(0, nil))
 	return nc, nil, false
 }
 
